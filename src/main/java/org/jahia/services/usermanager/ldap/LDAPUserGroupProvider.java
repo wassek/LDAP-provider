@@ -71,16 +71,7 @@
  */
 package org.jahia.services.usermanager.ldap;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.Properties;
-import java.util.Set;
+import java.util.*;
 
 import com.google.common.collect.Lists;
 import com.sun.jndi.ldap.LdapURL;
@@ -1240,15 +1231,43 @@ public class LDAPUserGroupProvider extends BaseUserGroupProvider {
             }
         } else {
             // consider the attributes
-            Iterator<?> filterKeys = ldapfilters.keySet().iterator();
-            while (filterKeys.hasNext()) {
-                String filterName = (String) filterKeys.next();
-                String filterValue = ldapfilters.getProperty(filterName);
+            List<Object> values = new ArrayList<>();
+            for (Object next : ldapfilters.values()) {
+                if(!values.contains(next)){
+                    values.add(next);
+                }
+            }
+            if(values.size()==1 && ((String)values.get(0)).split(" ").length>1) {
+               // All criteria have same filter, and the criteria can be split on whitespace to do an 'and' on each term
+                String[] terms = ((String) values.get(0)).split(" ");
+                for (String term : terms) {
+                    ContainerCriteria containerCriteria = null;
+                    Iterator<?> filterKeys = ldapfilters.keySet().iterator();
+                    while (filterKeys.hasNext()) {
+                        String filterName = (String) filterKeys.next();
+                        if(containerCriteria==null) {
+                            containerCriteria = query().where(filterName).like(term.endsWith("*")?term:term+"*");
+                        } else {
+                            addCriteriaToQuery(containerCriteria, true, filterName).like(term.endsWith("*")?term:term+"*");
+                        }
+                    }
+                    if(filterQuery==null) {
+                        filterQuery = containerCriteria;
+                    } else {
+                        filterQuery = filterQuery.and(containerCriteria);
+                    }
+                }
+            } else {
+                Iterator<?> filterKeys = ldapfilters.keySet().iterator();
+                while (filterKeys.hasNext()) {
+                    String filterName = (String) filterKeys.next();
+                    String filterValue = ldapfilters.getProperty(filterName);
 
-                if (filterQuery == null) {
-                    filterQuery = query().where(filterName).like(filterValue);
-                } else {
-                    addCriteriaToQuery(filterQuery, isOrOperator, filterName).like(filterValue);
+                    if (filterQuery == null) {
+                        filterQuery = query().where(filterName).like(filterValue);
+                    } else {
+                        addCriteriaToQuery(filterQuery, isOrOperator, filterName).like(filterValue);
+                    }
                 }
             }
         }
