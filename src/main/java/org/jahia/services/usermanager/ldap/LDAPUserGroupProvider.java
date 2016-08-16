@@ -120,7 +120,9 @@ public class LDAPUserGroupProvider extends BaseUserGroupProvider {
 
     @Override
     public JahiaUser getUser(String name) throws UserNotFoundException {
-        LDAPUserCacheEntry userCacheEntry = getUserCacheEntry(name, true);
+        Properties searchCriteria = new Properties();
+        searchCriteria.put("*","*");
+        LDAPUserCacheEntry userCacheEntry = getUserCacheEntry(searchCriteria, name, true);
         if (!userCacheEntry.getExist()) {
             throw new UserNotFoundException("unable to find user " + name + " on provider " + getKey());
         } else {
@@ -166,14 +168,15 @@ public class LDAPUserGroupProvider extends BaseUserGroupProvider {
     }
 
     @Override
-    public List<String> getMembership(final Member member) {
+    public List<String> getMembership(final Properties searchCriteria, final Member member) {
 
         boolean isGroup = member.getType().equals(Member.MemberType.GROUP);
 
         if (isGroup && !userConfig.isCanGroupContainSubGroups()) {
             return Collections.emptyList();
         }
-        LDAPAbstractCacheEntry cacheEntry = isGroup ? getGroupCacheEntry(member.getName(), false) : getUserCacheEntry(member.getName(), false);
+        LDAPAbstractCacheEntry cacheEntry = isGroup ? getGroupCacheEntry(member.getName(), false) : getUserCacheEntry
+                (searchCriteria, member.getName(), false);
         if (cacheEntry.getMemberships() != null) {
             return new ArrayList<String>(cacheEntry.getMemberships());
         }
@@ -187,13 +190,17 @@ public class LDAPUserGroupProvider extends BaseUserGroupProvider {
 
             @Override
             public List<String> doInLdap(LdapTemplate ldapTemplate) {
+                final ContainerCriteria query = query().base(groupConfig.getSearchName())
+                        .attributes(groupConfig.getSearchAttribute())
+                        .where(OBJECTCLASS_ATTRIBUTE)
+                        .is(groupConfig.getSearchObjectclass())
+                        .and(groupConfig.getMembersAttribute())
+                        .like(dn);
+                appendQueryBySearchCriteria(query, searchCriteria);
+
+
                 return ldapTemplate.search(
-                        query().base(groupConfig.getSearchName())
-                                .attributes(groupConfig.getSearchAttribute())
-                                .where(OBJECTCLASS_ATTRIBUTE)
-                                .is(groupConfig.getSearchObjectclass())
-                                .and(groupConfig.getMembersAttribute())
-                                .like(dn),
+                        query,
                         new AttributesMapper<String>() {
 
                             @Override
@@ -218,9 +225,9 @@ public class LDAPUserGroupProvider extends BaseUserGroupProvider {
         }
 
         if (groupConfig.isDynamicEnabled()) {
-            Properties searchCriteria = new Properties();
-            searchCriteria.put("*", "*");
-            List<String> dynGroups = searchGroups(searchCriteria, true);
+            Properties searchCriterias = new Properties();
+            searchCriterias.put("*", "*");
+            List<String> dynGroups = searchGroups(searchCriterias, true);
             for (String dynGroup : dynGroups) {
                 List<Member> members = getGroupMembers(dynGroup);
                 if (members.contains(member)) {
@@ -237,6 +244,24 @@ public class LDAPUserGroupProvider extends BaseUserGroupProvider {
         }
 
         return new ArrayList<String>(cacheEntry.getMemberships());
+    }
+
+    private void appendQueryBySearchCriteria(ContainerCriteria query, Properties searchCriteria) {
+        Properties ldapfilters = mapJahiaPropertiesToLDAP(searchCriteria, userConfig.getAttributesMapper());
+
+        if (ldapfilters == null) {
+            return;
+        }
+
+        // define and / or operator
+        boolean orOp = isOrOperator(ldapfilters, searchCriteria);
+
+        // process the user specific filters
+        ContainerCriteria filterQuery = getQueryFilters(ldapfilters, userConfig, orOp);
+
+        if (filterQuery != null) {
+            query.and(filterQuery);
+        }
     }
 
     @Override
@@ -298,7 +323,9 @@ public class LDAPUserGroupProvider extends BaseUserGroupProvider {
         logger.debug("Verify password for {}", userName);
         DirContext ctx = null;
         try {
-            LDAPUserCacheEntry userCacheEntry = getUserCacheEntry(userName, true);
+            Properties searchCriteria = new Properties();
+            searchCriteria.put("*","*");
+            LDAPUserCacheEntry userCacheEntry = getUserCacheEntry(searchCriteria, userName, true);
             if (userCacheEntry.getExist()) {
                 long startTime = System.currentTimeMillis();
                 ctx = contextSource.getContext(userCacheEntry.getDn(), userPassword);
@@ -527,14 +554,17 @@ public class LDAPUserGroupProvider extends BaseUserGroupProvider {
                 // do queries
                 // and cache the result
                 Member member = null;
-                LDAPUserCacheEntry userCacheEntry = getUserCacheEntryByDN(memberNaming, true);
+                Properties searchCriteria = new Properties();
+                searchCriteria.put("*","*");
+                LDAPUserCacheEntry userCacheEntry = getUserCacheEntryByDN(searchCriteria, memberNaming, true);
                 if (userCacheEntry == null) {
                     // look in groups
-                    LDAPGroupCacheEntry groupCacheEntry = getGroupCacheEntryByDN(memberNaming, true, false);
+                    LDAPGroupCacheEntry groupCacheEntry = getGroupCacheEntryByDN(searchCriteria, memberNaming, true,
+                            false);
                     if (groupCacheEntry == null) {
                         if (groupConfig.isDynamicEnabled()) {
                             // look in dynamic groups
-                            groupCacheEntry = getGroupCacheEntryByDN(memberNaming, true, true);
+                            groupCacheEntry = getGroupCacheEntryByDN(searchCriteria, memberNaming, true, true);
                             if (groupCacheEntry != null) {
                                 member = new Member(groupCacheEntry.getName(), Member.MemberType.GROUP);
                             }
@@ -564,7 +594,8 @@ public class LDAPUserGroupProvider extends BaseUserGroupProvider {
      * @param cache
      * @return
      */
-    private LDAPUserCacheEntry getUserCacheEntry(final String userName, boolean cache) {
+    private LDAPUserCacheEntry getUserCacheEntry(final Properties searchCriteria, final String userName, boolean
+            cache) {
 
         LDAPUserCacheEntry userCacheEntry = ldapCacheManager.getUserCacheEntryByName(getKey(), userName);
         if (userCacheEntry != null) {
@@ -582,10 +613,12 @@ public class LDAPUserGroupProvider extends BaseUserGroupProvider {
         boolean validLdapCall = ldapTemplateWrapper.execute(new BaseLdapActionCallback<Boolean>(getExternalUserGroupService(), getKey()) {
             @Override
             public Boolean doInLdap(LdapTemplate ldapTemplate) {
-                ldapTemplate.search(query().base(userConfig.getUidSearchName())
-                                .attributes(userAttrs.toArray(new String[userAttrs.size()]))
-                                .where(OBJECTCLASS_ATTRIBUTE).is(userConfig.getSearchObjectclass())
-                                .and(userConfig.getUidSearchAttribute()).is(userName),
+                final ContainerCriteria query = query().base(userConfig.getUidSearchName())
+                        .attributes(userAttrs.toArray(new String[userAttrs.size()]))
+                        .where(OBJECTCLASS_ATTRIBUTE).is(userConfig.getSearchObjectclass())
+                        .and(userConfig.getUidSearchAttribute()).is(userName);
+                appendQueryBySearchCriteria(query,searchCriteria);
+                ldapTemplate.search(query,
                         nameClassPairCallbackHandler);
                 return true;
             }
@@ -632,10 +665,12 @@ public class LDAPUserGroupProvider extends BaseUserGroupProvider {
         }
 
         try {
-            groupCacheEntry = getGroupCacheEntryByName(groupName, false, false);
+            Properties searchCriteria = new Properties();
+            searchCriteria.put("*","*");
+            groupCacheEntry = getGroupCacheEntryByName(searchCriteria, groupName, false, false);
             if (groupCacheEntry == null) {
                 if (groupConfig.isDynamicEnabled()) {
-                    groupCacheEntry = getGroupCacheEntryByName(groupName, false, true);
+                    groupCacheEntry = getGroupCacheEntryByName(searchCriteria,groupName, false, true);
                 } else {
                     groupCacheEntry = new LDAPGroupCacheEntry(groupName);
                     groupCacheEntry.setExist(false);
@@ -661,7 +696,10 @@ public class LDAPUserGroupProvider extends BaseUserGroupProvider {
      * @param isDynamic
      * @return
      */
-    private LDAPGroupCacheEntry getGroupCacheEntryByName(final String name, boolean cache, final boolean isDynamic) throws Exception {
+    private LDAPGroupCacheEntry getGroupCacheEntryByName(final Properties searchCriteria, final String name, boolean
+            cache, final
+    boolean
+            isDynamic) throws Exception {
 
         final List<String> groupAttrs = getGroupAttributes(isDynamic);
         final GroupNameClassPairCallbackHandler nameClassPairCallbackHandler = new GroupNameClassPairCallbackHandler(null, isDynamic);
@@ -671,10 +709,12 @@ public class LDAPUserGroupProvider extends BaseUserGroupProvider {
         boolean validLdapCall = ldapTemplateWrapper.execute(new BaseLdapActionCallback<Boolean>(getExternalUserGroupService(), getKey()) {
             @Override
             public Boolean doInLdap(LdapTemplate ldapTemplate) {
-                ldapTemplate.search(query().base(groupConfig.getSearchName())
-                                .attributes(groupAttrs.toArray(new String[groupAttrs.size()]))
-                                .where(OBJECTCLASS_ATTRIBUTE).is(isDynamic ? groupConfig.getDynamicSearchObjectclass() : groupConfig.getSearchObjectclass())
-                                .and(groupConfig.getSearchAttribute()).is(name),
+                final ContainerCriteria query = query().base(groupConfig.getSearchName())
+                        .attributes(groupAttrs.toArray(new String[groupAttrs.size()]))
+                        .where(OBJECTCLASS_ATTRIBUTE).is(isDynamic ? groupConfig.getDynamicSearchObjectclass() : groupConfig.getSearchObjectclass())
+                        .and(groupConfig.getSearchAttribute()).is(name);
+                appendQueryBySearchCriteria(query,searchCriteria);
+                ldapTemplate.search(query,
                         nameClassPairCallbackHandler);
                 return true;
             }
@@ -703,7 +743,8 @@ public class LDAPUserGroupProvider extends BaseUserGroupProvider {
      * @param isDynamic
      * @return
      */
-    private LDAPGroupCacheEntry getGroupCacheEntryByDN(final String dn, boolean cache, final boolean isDynamic) {
+    private LDAPGroupCacheEntry getGroupCacheEntryByDN(final Properties searchCriteria, final String dn, boolean
+            cache, final boolean isDynamic) {
 
         final List<String> groupAttrs = getGroupAttributes(isDynamic);
         final GroupNameClassPairCallbackHandler nameClassPairCallbackHandler = new GroupNameClassPairCallbackHandler(null, isDynamic);
@@ -712,10 +753,12 @@ public class LDAPUserGroupProvider extends BaseUserGroupProvider {
 
             @Override
             public Object doInLdap(LdapTemplate ldapTemplate) {
-                ldapTemplate.search(query().base(dn)
-                                .attributes(groupAttrs.toArray(new String[groupAttrs.size()]))
-                                .searchScope(SearchScope.OBJECT)
-                                .where(OBJECTCLASS_ATTRIBUTE).is(isDynamic ? groupConfig.getDynamicSearchObjectclass() : groupConfig.getSearchObjectclass()),
+                final ContainerCriteria query = query().base(dn)
+                        .attributes(groupAttrs.toArray(new String[groupAttrs.size()]))
+                        .searchScope(SearchScope.OBJECT)
+                        .where(OBJECTCLASS_ATTRIBUTE).is(isDynamic ? groupConfig.getDynamicSearchObjectclass() : groupConfig.getSearchObjectclass());
+                appendQueryBySearchCriteria(query,searchCriteria);
+                ldapTemplate.search(query,
                         nameClassPairCallbackHandler);
                 return null;
             }
@@ -743,7 +786,7 @@ public class LDAPUserGroupProvider extends BaseUserGroupProvider {
      * @param cache
      * @return
      */
-    private LDAPUserCacheEntry getUserCacheEntryByDN(final String dn, boolean cache) {
+    private LDAPUserCacheEntry getUserCacheEntryByDN(final Properties searchCriteria, final String dn, boolean cache) {
 
         final List<String> userAttrs = getUserAttributes();
         final UserNameClassPairCallbackHandler nameClassPairCallbackHandler = new UserNameClassPairCallbackHandler(null);
@@ -752,10 +795,12 @@ public class LDAPUserGroupProvider extends BaseUserGroupProvider {
 
             @Override
             public Object doInLdap(LdapTemplate ldapTemplate) {
-                ldapTemplate.search(query().base(dn)
-                                .attributes(userAttrs.toArray(new String[userAttrs.size()]))
-                                .searchScope(SearchScope.OBJECT)
-                                .where(OBJECTCLASS_ATTRIBUTE).is(userConfig.getSearchObjectclass()),
+                final ContainerCriteria query = query().base(dn)
+                        .attributes(userAttrs.toArray(new String[userAttrs.size()]))
+                        .searchScope(SearchScope.OBJECT)
+                        .where(OBJECTCLASS_ATTRIBUTE).is(userConfig.getSearchObjectclass());
+                appendQueryBySearchCriteria(query,searchCriteria);
+                ldapTemplate.search(query,
                         nameClassPairCallbackHandler);
                 return null;
             }
