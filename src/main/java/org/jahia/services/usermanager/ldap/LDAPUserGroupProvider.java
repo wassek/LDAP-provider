@@ -286,7 +286,9 @@ public class LDAPUserGroupProvider extends BaseUserGroupProvider {
 
             @Override
             public Object doInLdap(LdapTemplate ldapTemplate) {
-                ldapTemplate.search(query, searchNameClassPairCallbackHandler);
+                String userFilter = getUserFilter();
+                ldapTemplate.search(query.base(),userFilter, searchNameClassPairCallbackHandler);
+                //ldapTemplate.search(query, searchNameClassPairCallbackHandler);
                 return null;
             }
         });
@@ -295,6 +297,7 @@ public class LDAPUserGroupProvider extends BaseUserGroupProvider {
         List<String> names = searchNameClassPairCallbackHandler.getNames();
         return names.subList(Math.min((int) offset, names.size()), limit < 0 ? names.size() : Math.min((int) (offset + limit), names.size()));
     }
+
 
     @Override
     public List<String> searchGroups(Properties searchCriteria, long offset, long limit) {
@@ -394,7 +397,7 @@ public class LDAPUserGroupProvider extends BaseUserGroupProvider {
 
             @Override
             public Object doInLdap(LdapTemplate ldapTemplate) {
-                ldapTemplate.search(query, searchNameClassPairCallbackHandler);
+                ldapTemplate.search(query.base(), getGroupFilter(), searchNameClassPairCallbackHandler);
                 return null;
             }
         });
@@ -1165,7 +1168,17 @@ public class LDAPUserGroupProvider extends BaseUserGroupProvider {
     private ContainerCriteria buildUserQuery(Properties searchCriteria) {
 
         List<String> attributesToRetrieve = getUserAttributes();
-        ContainerCriteria query = query().base(userConfig.getUidSearchName())
+        String uidSearchName = userConfig.getUidSearchName();
+        String uidSearchNameDn = null;
+        if(uidSearchName.contains("("))
+        {
+            uidSearchNameDn = uidSearchName.substring(0,uidSearchName.indexOf("("));
+        }
+        else
+        {
+            uidSearchNameDn = uidSearchName;
+        }
+        ContainerCriteria query = query().base(uidSearchNameDn)
                 .attributes(attributesToRetrieve.toArray(new String[attributesToRetrieve.size()]))
                 .countLimit((int) userConfig.getSearchCountlimit())
                 .where(OBJECTCLASS_ATTRIBUTE).is(StringUtils.defaultString(userConfig.getSearchObjectclass(), "*"));
@@ -1186,7 +1199,6 @@ public class LDAPUserGroupProvider extends BaseUserGroupProvider {
         if (filterQuery != null) {
             query.and(filterQuery);
         }
-
         return query;
     }
 
@@ -1242,7 +1254,18 @@ public class LDAPUserGroupProvider extends BaseUserGroupProvider {
             attributesToRetrieve.add(groupConfig.getDynamicMembersAttribute());
         }
 
-        ContainerCriteria query = query().base(groupConfig.getSearchName())
+        String groupSearchName = groupConfig.getSearchName();
+        String groupSearchNameDn = null;
+        if(groupSearchNameDn.contains("("))
+        {
+            groupSearchNameDn = groupSearchName.substring(0,groupSearchName.indexOf("("));
+        }
+        else
+        {
+            groupSearchNameDn = groupSearchName;
+        }
+
+        ContainerCriteria query = query().base(groupSearchNameDn)
                 .attributes(attributesToRetrieve.toArray(new String[attributesToRetrieve.size()]))
                 .countLimit((int) groupConfig.getSearchCountlimit())
                 .where(OBJECTCLASS_ATTRIBUTE).is(isDynamic ? groupConfig.getDynamicSearchObjectclass() : groupConfig.getSearchObjectclass());
@@ -1409,6 +1432,36 @@ public class LDAPUserGroupProvider extends BaseUserGroupProvider {
         List<String> commons = new ArrayList<String>(first);
         commons.retainAll(second);
         return commons;
+    }
+
+    /**
+     * Get user search declared filter from user configuration
+     * @return the user filter in the configuration descibed between parentheses
+     */
+    private String getUserFilter() {
+        final int filterIndex = userConfig.getUidSearchName
+                ().indexOf("(");
+        String userFilter = "";
+        if(filterIndex>0)
+        {
+            userFilter = userConfig.getUidSearchName().substring(filterIndex);
+        }
+        return userFilter;
+    }
+
+    /**
+     * Get group search declared filter from group configuration
+     * @return the group filter in the configuration descibed between parentheses
+     */
+    private String getGroupFilter() {
+        final int filterIndex = groupConfig.getSearchName
+                ().indexOf("(");
+        String groupFilter = "";
+        if(filterIndex>0)
+        {
+            groupFilter = userConfig.getUidSearchName().substring(filterIndex);
+        }
+        return groupFilter;
     }
 
     public void setLdapTemplateWrapper(LdapTemplateWrapper ldapTemplateWrapper) {
