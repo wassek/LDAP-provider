@@ -287,8 +287,14 @@ public class LDAPUserGroupProvider extends BaseUserGroupProvider {
             @Override
             public Object doInLdap(LdapTemplate ldapTemplate) {
                 String userFilter = getUserFilter();
-                ldapTemplate.search(query.base(),userFilter, searchNameClassPairCallbackHandler);
-                //ldapTemplate.search(query, searchNameClassPairCallbackHandler);
+                if(userFilter!= null) {
+                    ldapTemplate.search(query.base(), combineFilterFromQueryAndConfig(query,userFilter),
+                            searchNameClassPairCallbackHandler);
+                }
+                else
+                {
+                    ldapTemplate.search(query, searchNameClassPairCallbackHandler);
+                }
                 return null;
             }
         });
@@ -397,7 +403,16 @@ public class LDAPUserGroupProvider extends BaseUserGroupProvider {
 
             @Override
             public Object doInLdap(LdapTemplate ldapTemplate) {
-                ldapTemplate.search(query.base(), getGroupFilter(), searchNameClassPairCallbackHandler);
+                final String groupFilter = getGroupFilter();
+                if(groupFilter!= null)
+                {
+                    ldapTemplate.search(query.base(), combineFilterFromQueryAndConfig(query,groupFilter),
+                            searchNameClassPairCallbackHandler);
+                }
+                else
+                {
+                    ldapTemplate.search(query, searchNameClassPairCallbackHandler);
+                }
                 return null;
             }
         });
@@ -405,6 +420,8 @@ public class LDAPUserGroupProvider extends BaseUserGroupProvider {
 
         return searchNameClassPairCallbackHandler.getNames();
     }
+
+
 
     /**
      * get the members from a ldap URL used for dynamic groups
@@ -1425,7 +1442,7 @@ public class LDAPUserGroupProvider extends BaseUserGroupProvider {
     private String getUserFilter() {
         final String uidSearchName = userConfig.getUidSearchName();
         final int filterIndex = uidSearchName.indexOf("(");
-        String userFilter = "";
+        String userFilter = null;
         if(filterIndex>0)
         {
             userFilter = uidSearchName.substring(filterIndex);
@@ -1440,12 +1457,22 @@ public class LDAPUserGroupProvider extends BaseUserGroupProvider {
     private String getGroupFilter() {
         final String groupSearchName = groupConfig.getSearchName();
         final int filterIndex = groupSearchName.indexOf("(");
-        String groupFilter = "";
+        String groupFilter = null;
         if(filterIndex>0)
         {
             groupFilter = groupSearchName.substring(filterIndex);
         }
         return groupFilter;
+    }
+
+    /**
+     * Combbine between query base filter and configuration filter
+     * @param query the container criteria containing the basic filter
+     * @param configFilter ldap config filter
+     * @return
+     */
+    private String combineFilterFromQueryAndConfig(ContainerCriteria query,String configFilter) {
+        return "(&" + query.filter().toString()+ configFilter +")";
     }
 
     /**
