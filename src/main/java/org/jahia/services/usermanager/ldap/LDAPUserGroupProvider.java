@@ -190,7 +190,7 @@ public class LDAPUserGroupProvider extends BaseUserGroupProvider {
 
             @Override
             public List<String> doInLdap(LdapTemplate ldapTemplate) {
-                final ContainerCriteria query = query().base(groupConfig.getSearchName())
+                final ContainerCriteria query = query().base(getGroupDn())
                         .attributes(groupConfig.getSearchAttribute())
                         .where(OBJECTCLASS_ATTRIBUTE)
                         .is(groupConfig.getSearchObjectclass())
@@ -616,7 +616,7 @@ public class LDAPUserGroupProvider extends BaseUserGroupProvider {
         boolean validLdapCall = ldapTemplateWrapper.execute(new BaseLdapActionCallback<Boolean>(getExternalUserGroupService(), getKey()) {
             @Override
             public Boolean doInLdap(LdapTemplate ldapTemplate) {
-                final ContainerCriteria query = query().base(userConfig.getUidSearchName())
+                final ContainerCriteria query = query().base(getUserDn())
                         .attributes(userAttrs.toArray(new String[userAttrs.size()]))
                         .where(OBJECTCLASS_ATTRIBUTE).is(userConfig.getSearchObjectclass())
                         .and(userConfig.getUidSearchAttribute()).is(userName);
@@ -712,7 +712,7 @@ public class LDAPUserGroupProvider extends BaseUserGroupProvider {
         boolean validLdapCall = ldapTemplateWrapper.execute(new BaseLdapActionCallback<Boolean>(getExternalUserGroupService(), getKey()) {
             @Override
             public Boolean doInLdap(LdapTemplate ldapTemplate) {
-                final ContainerCriteria query = query().base(groupConfig.getSearchName())
+                final ContainerCriteria query = query().base(getGroupDn())
                         .attributes(groupAttrs.toArray(new String[groupAttrs.size()]))
                         .where(OBJECTCLASS_ATTRIBUTE).is(isDynamic ? groupConfig.getDynamicSearchObjectclass() : groupConfig.getSearchObjectclass())
                         .and(groupConfig.getSearchAttribute()).is(name);
@@ -1168,16 +1168,8 @@ public class LDAPUserGroupProvider extends BaseUserGroupProvider {
     private ContainerCriteria buildUserQuery(Properties searchCriteria) {
 
         List<String> attributesToRetrieve = getUserAttributes();
-        String uidSearchName = userConfig.getUidSearchName();
-        String uidSearchNameDn = null;
-        if(uidSearchName.contains("("))
-        {
-            uidSearchNameDn = uidSearchName.substring(0,uidSearchName.indexOf("("));
-        }
-        else
-        {
-            uidSearchNameDn = uidSearchName;
-        }
+
+        String uidSearchNameDn = getUserDn();
         ContainerCriteria query = query().base(uidSearchNameDn)
                 .attributes(attributesToRetrieve.toArray(new String[attributesToRetrieve.size()]))
                 .countLimit((int) userConfig.getSearchCountlimit())
@@ -1254,16 +1246,8 @@ public class LDAPUserGroupProvider extends BaseUserGroupProvider {
             attributesToRetrieve.add(groupConfig.getDynamicMembersAttribute());
         }
 
-        String groupSearchName = groupConfig.getSearchName();
-        String groupSearchNameDn = null;
-        if(groupSearchNameDn.contains("("))
-        {
-            groupSearchNameDn = groupSearchName.substring(0,groupSearchName.indexOf("("));
-        }
-        else
-        {
-            groupSearchNameDn = groupSearchName;
-        }
+
+        String groupSearchNameDn = getGroupDn();
 
         ContainerCriteria query = query().base(groupSearchNameDn)
                 .attributes(attributesToRetrieve.toArray(new String[attributesToRetrieve.size()]))
@@ -1386,10 +1370,10 @@ public class LDAPUserGroupProvider extends BaseUserGroupProvider {
     private Boolean guessUserOrGroupFromDN(String dn) throws InvalidNameException {
         Boolean isUser = null;
         final LdapName memberLdapName = LdapUtils.newLdapName(dn);
-        if (memberLdapName.startsWith(new LdapName(userConfig.getUidSearchName()))) {
+        if (memberLdapName.startsWith(new LdapName(getUserDn()))) {
             // it's a user
             isUser = distinctBase ? true : null;
-        } else if (memberLdapName.startsWith(new LdapName(groupConfig.getSearchName()))) {
+        } else if (memberLdapName.startsWith(new LdapName(getGroupDn()))) {
             // it's a group
             isUser = distinctBase ? false : null;
         }
@@ -1439,29 +1423,62 @@ public class LDAPUserGroupProvider extends BaseUserGroupProvider {
      * @return the user filter in the configuration descibed between parentheses
      */
     private String getUserFilter() {
-        final int filterIndex = userConfig.getUidSearchName
-                ().indexOf("(");
+        final String uidSearchName = userConfig.getUidSearchName();
+        final int filterIndex = uidSearchName.indexOf("(");
         String userFilter = "";
         if(filterIndex>0)
         {
-            userFilter = userConfig.getUidSearchName().substring(filterIndex);
+            userFilter = uidSearchName.substring(filterIndex);
         }
         return userFilter;
     }
 
     /**
      * Get group search declared filter from group configuration
-     * @return the group filter in the configuration descibed between parentheses
+     * @return the group filter in the configuration described between parentheses
      */
     private String getGroupFilter() {
-        final int filterIndex = groupConfig.getSearchName
-                ().indexOf("(");
+        final String groupSearchName = groupConfig.getSearchName();
+        final int filterIndex = groupSearchName.indexOf("(");
         String groupFilter = "";
         if(filterIndex>0)
         {
-            groupFilter = userConfig.getUidSearchName().substring(filterIndex);
+            groupFilter = groupSearchName.substring(filterIndex);
         }
         return groupFilter;
+    }
+
+    /**
+     * Get group search DN
+     * @return the group search DN
+     */
+    private String getGroupDn()
+    {
+        String groupSearchName = groupConfig.getSearchName();
+        String groupSearchNameDn = null;
+        if(groupSearchName.contains("("))
+        {
+            groupSearchNameDn = groupSearchName.substring(0,groupSearchName.indexOf("("));
+        }
+        else
+        {
+            groupSearchNameDn = groupSearchName;
+        }
+        return  groupSearchNameDn;
+    }
+
+    /**
+     * Get group search DN
+     * @return the group search DN
+     */
+    private String getUserDn() {
+        String uidSearchName = userConfig.getUidSearchName();
+        String uidSearchNameDn = uidSearchName;
+        if(uidSearchName.contains("("))
+        {
+            uidSearchNameDn = uidSearchName.substring(0,uidSearchName.indexOf("("));
+        }
+        return  uidSearchNameDn;
     }
 
     public void setLdapTemplateWrapper(LdapTemplateWrapper ldapTemplateWrapper) {
